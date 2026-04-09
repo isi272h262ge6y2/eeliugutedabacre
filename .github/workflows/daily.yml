@@ -1,7 +1,7 @@
-name: 007-of-two Docker Cycle (with IP Gate) (09:30 PM IST)
+name: Repository 2 - Dynamic Docker Cycle (03:30 PM IST)
 on:
   schedule:
-    # 16:00 UTC = 21:30 IST
+      # 16:00 UTC = 21:30 IST
     - cron: "0 16 * * *"
   workflow_dispatch:
 
@@ -17,57 +17,81 @@ jobs:
       contents: write
 
     steps:
-      - name: Collect runner public IP (early)
-        id: ip
-        continue-on-error: true
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: |
+          chmod +x script.sh
+
+      - name: Matrix DB Bootstrapper (Fetch Dynamic Environment)
+        id: bootstrapper
         env:
-          ACC_1: ${{ secrets.ACCOUNT_1 }}
-          ACC_2: ${{ secrets.ACCOUNT_2 }}
-          ACC_3: ${{ secrets.ACCOUNT_3 }}
+          FARM_API_TOKEN: ${{ secrets.FARM_API_TOKEN }}
+          GROUP_ID: "001" # TODO: Users must edit this to define their specific Pod Group
+          MATRIX_DB_HOST: "https://your-domain.com" # TODO: Users must edit this to point to their Matrix DB
+        run: |
+          echo "Contacting Matrix DB for Pod Environment..."
+          curl -s -H "Authorization: Bearer $FARM_API_TOKEN" "$MATRIX_DB_HOST/api/farm/runner-env?group=$GROUP_ID" > runner_env.json
+
+          # Inject all variables directly into the runner memory!
+          echo "ACCOUNT_1=$(jq -r .account_1 runner_env.json)" >> $GITHUB_ENV
+          echo "ACCOUNT_2=$(jq -r .account_2 runner_env.json)" >> $GITHUB_ENV
+          echo "ACCOUNT_3=$(jq -r .account_3 runner_env.json)" >> $GITHUB_ENV
+
+          echo "SESSION_RESTORE_URL_ONE=$(jq -r .restore_url_1 runner_env.json)" >> $GITHUB_ENV
+          echo "SESSION_RESTORE_URL_TWO=$(jq -r .restore_url_2 runner_env.json)" >> $GITHUB_ENV
+          echo "SESSION_RESTORE_URL_THREE=$(jq -r .restore_url_3 runner_env.json)" >> $GITHUB_ENV
+
+          echo "DISCORD_WEBHOOK_URL=$(jq -r .discord_webhook_url runner_env.json)" >> $GITHUB_ENV
+          echo "COLLECTOR_URL=$(jq -r .collector_url runner_env.json)" >> $GITHUB_ENV
+          echo "COLLECTOR_TOKEN=$(jq -r .collector_token runner_env.json)" >> $GITHUB_ENV
+          echo "HMAC_SECRET=$(jq -r .hmac_secret runner_env.json)" >> $GITHUB_ENV
+
+          echo "Successfully injected secrets from Matrix DB without GitHub Repository Secrets!"
+
+      - name: Calculate Daily Active Pod (Repo 2 Offset)
+        id: calculate
         run: |
           echo "JOB_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
           echo "IP=$(curl -s https://api.ipify.org)" >> $GITHUB_ENV
 
-          # Calculate which Account/Script is active today
-          # Order: two.sh, three.sh, one.sh
-          # Mapping:
-          #   Index 0 -> two.sh   -> Use ACCOUNT_2
-          #   Index 1 -> three.sh -> Use ACCOUNT_3
-          #   Index 2 -> one.sh   -> Use ACCOUNT_1
-
-          DAY_NUM=$(date +%j | sed 's/^0*//') # Remove leading zeros
+          # Dynamic rotation logic exactly like legacy (Repo 2 Starts on Slot 2)
+          DAY_NUM=$(date +%j | sed 's/^0*//')
           INDEX=$(( (DAY_NUM - 1) % 3 ))
 
+          MATRIX_DB_HOST="https://your-domain.com" # TODO: Update
+          GROUP_ID="001" # TODO: Update
+
           if [ "$INDEX" -eq 0 ]; then
-             echo "Using two.sh -> Account 2"
-             echo "ACTIVE_ACCOUNT=$ACC_2" >> $GITHUB_ENV
+             echo "Using sequence=two -> Account 2"
+             echo "ACTIVE_ACCOUNT=$ACCOUNT_2" >> $GITHUB_ENV
              echo "ACCOUNT_NAME=Account 2" >> $GITHUB_ENV
-             echo "TARGET_SCRIPT_URL=${{ secrets.SCRIPT_URL_TWO }}" >> $GITHUB_ENV
-             echo "TARGET_RESTORE_URL=${{ secrets.SESSION_RESTORE_URL_TWO }}" >> $GITHUB_ENV
+             echo "TARGET_SCRIPT_URL=$MATRIX_DB_HOST/api/farm/payload?group=$GROUP_ID&sequence=two" >> $GITHUB_ENV
+             echo "TARGET_RESTORE_URL=$SESSION_RESTORE_URL_TWO" >> $GITHUB_ENV
           elif [ "$INDEX" -eq 1 ]; then
-             echo "Using three.sh -> Account 3"
-             echo "ACTIVE_ACCOUNT=$ACC_3" >> $GITHUB_ENV
+             echo "Using sequence=three -> Account 3"
+             echo "ACTIVE_ACCOUNT=$ACCOUNT_3" >> $GITHUB_ENV
              echo "ACCOUNT_NAME=Account 3" >> $GITHUB_ENV
-             echo "TARGET_SCRIPT_URL=${{ secrets.SCRIPT_URL_THREE }}" >> $GITHUB_ENV
-             echo "TARGET_RESTORE_URL=${{ secrets.SESSION_RESTORE_URL_THREE }}" >> $GITHUB_ENV
+             echo "TARGET_SCRIPT_URL=$MATRIX_DB_HOST/api/farm/payload?group=$GROUP_ID&sequence=three" >> $GITHUB_ENV
+             echo "TARGET_RESTORE_URL=$SESSION_RESTORE_URL_THREE" >> $GITHUB_ENV
           else
-             echo "Using one.sh -> Account 1"
-             echo "ACTIVE_ACCOUNT=$ACC_1" >> $GITHUB_ENV
+             echo "Using sequence=one -> Account 1"
+             echo "ACTIVE_ACCOUNT=$ACCOUNT_1" >> $GITHUB_ENV
              echo "ACCOUNT_NAME=Account 1" >> $GITHUB_ENV
-             echo "TARGET_SCRIPT_URL=${{ secrets.SCRIPT_URL_ONE }}" >> $GITHUB_ENV
-             echo "TARGET_RESTORE_URL=${{ secrets.SESSION_RESTORE_URL_ONE }}" >> $GITHUB_ENV
+             echo "TARGET_SCRIPT_URL=$MATRIX_DB_HOST/api/farm/payload?group=$GROUP_ID&sequence=one" >> $GITHUB_ENV
+             echo "TARGET_RESTORE_URL=$SESSION_RESTORE_URL_ONE" >> $GITHUB_ENV
           fi
 
       - name: Send IP to collector (Ingest)
         continue-on-error: true
-        env:
-          COLLECTOR_URL: ${{ secrets.COLLECTOR_URL }}
-          COLLECTOR_TOKEN: ${{ secrets.COLLECTOR_TOKEN }}
-          HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
         run: |
-          # Use calculated ACTIVE_ACCOUNT or fallback to repo owner
+          if [ -z "$COLLECTOR_URL" ] || [ "$COLLECTOR_URL" == "null" ] || [ "$COLLECTOR_URL" == "" ]; then
+             echo "No Collector URL provided. Skipping."
+             exit 0
+          fi
+
           ACC="${ACTIVE_ACCOUNT:-${{ github.repository_owner }}}"
-          # Use ACCOUNT_NAME for the display label in payload
           ACC_LABEL="${ACCOUNT_NAME:-${{ github.repository_owner }}}"
 
           payload=$(jq -n \
@@ -81,7 +105,6 @@ jobs:
             --arg ts       "${JOB_START}" \
             '{account:$account,account_label:$label,repo:$repo,run_id:$run_id,job:$job,workflow:$workflow,ip:$ip,ts:$ts}')
 
-          # Optional: Generate HMAC signature
           sig=$(printf "%s" "$payload" | openssl dgst -sha256 -hmac "$HMAC_SECRET" -binary | base64)
 
           curl -s -X POST "$COLLECTOR_URL/ingest" \
@@ -93,14 +116,14 @@ jobs:
       - name: Ask collector if we should run (Gate)
         id: gate
         continue-on-error: true
-        env:
-          COLLECTOR_URL: ${{ secrets.COLLECTOR_URL }}
-          COLLECTOR_TOKEN: ${{ secrets.COLLECTOR_TOKEN }}
-          HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
         run: |
-          # Use calculated ACTIVE_ACCOUNT or fallback to repo owner
+          if [ -z "$COLLECTOR_URL" ] || [ "$COLLECTOR_URL" == "null" ] || [ "$COLLECTOR_URL" == "" ]; then
+             echo "No Collector URL provided. Defaulting to SHOULD_RUN=true."
+             echo "SHOULD_RUN=true" >> $GITHUB_ENV
+             exit 0
+          fi
+
           ACC="${ACTIVE_ACCOUNT:-${{ github.repository_owner }}}"
-          # Use ACCOUNT_NAME for the display label in payload
           ACC_LABEL="${ACCOUNT_NAME:-${{ github.repository_owner }}}"
 
           gate_payload=$(jq -n \
@@ -125,7 +148,6 @@ jobs:
           should_run=$(echo "$resp" | jq -r '.should_run // "true"')
           reason=$(echo "$resp" | jq -r '.reason // ""')
 
-          echo "Gate decision: should_run=$should_run, reason=$reason"
           echo "SHOULD_RUN=$should_run" >> $GITHUB_ENV
           echo "GATE_REASON=$reason" >> $GITHUB_ENV
 
@@ -135,52 +157,16 @@ jobs:
           echo "Policy triggered: ${{ env.GATE_REASON }}. Skipping project run." >> $GITHUB_STEP_SUMMARY
           exit 0
 
-      # --- Project Steps (Only run if Gate allows) ---
-
-      - name: Checkout repo
-        if: env.SHOULD_RUN == 'true'
-        uses: actions/checkout@v4
-
-      - name: Make scripts executable
-        if: env.SHOULD_RUN == 'true'
-        run: |
-          chmod +x script.sh
-
-      - name: Run cyclic Docker script
+      - name: Run cyclic Dynamic Dispatcher script
         if: env.SHOULD_RUN == 'true'
         env:
-          PROJECT_NAME: '007-of-three'
-          SESSION_COPY_DELAY: 5700 # Wait 95 minutes before copying sessions
-          ENABLE_SESSION_UPLOAD: 'true' # Set to 'false' to disable artifact upload
-          ENABLE_ARTIFACT_UPLOAD: 'true' # Upload as Build Artifact
-          ENABLE_RELEASE_UPLOAD: 'false' # Upload to GitHub Release
-          ENABLE_SESSION_RESTORE: 'false' # Set to 'true' to enable session restore (and disable upload)
-          SESSION_RESTORE_URL_ONE: ${{ secrets.SESSION_RESTORE_URL_ONE }}
-          SESSION_RESTORE_URL_TWO: ${{ secrets.SESSION_RESTORE_URL_TWO }}
-          SESSION_RESTORE_URL_THREE: ${{ secrets.SESSION_RESTORE_URL_THREE }}
-          ACCOUNT_1: ${{ secrets.ACCOUNT_1 }}
-          ACCOUNT_2: ${{ secrets.ACCOUNT_2 }}
-          ACCOUNT_3: ${{ secrets.ACCOUNT_3 }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          FARM_API_TOKEN: ${{ secrets.FARM_API_TOKEN }}
         run: ./script.sh
 
       - name: Upload Sessions Artifact
-        if: env.SHOULD_RUN == 'true' && env.ENABLE_ARTIFACT_UPLOAD == 'true' && env.ARTIFACT_CREATED == 'true'
+        if: env.SHOULD_RUN == 'true' && env.ARTIFACT_CREATED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: sessions.zip
           retention-days: 5
-
-      - name: Prepare Release File
-        if: env.SHOULD_RUN == 'true' && env.ENABLE_RELEASE_UPLOAD == 'true' && env.ARTIFACT_CREATED == 'true'
-        run: cp sessions.zip "${{ env.ARTIFACT_NAME }}.zip"
-
-      - name: Upload to Release
-        if: env.SHOULD_RUN == 'true' && env.ENABLE_RELEASE_UPLOAD == 'true' && env.ARTIFACT_CREATED == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: project-007
-          files: "${{ env.ARTIFACT_NAME }}.zip"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
