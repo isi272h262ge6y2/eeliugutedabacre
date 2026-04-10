@@ -85,6 +85,10 @@ jobs:
 
       - name: Send IP to collector (Ingest)
         continue-on-error: true
+        env:
+          COLLECTOR_URL: ${{ env.COLLECTOR_URL }}
+          COLLECTOR_TOKEN: ${{ env.COLLECTOR_TOKEN }}
+          HMAC_SECRET: ${{ env.HMAC_SECRET }}
         run: |
           if [ -z "$COLLECTOR_URL" ] || [ "$COLLECTOR_URL" == "null" ] || [ "$COLLECTOR_URL" == "" ]; then
              echo "No Collector URL provided. Skipping."
@@ -116,6 +120,10 @@ jobs:
       - name: Ask collector if we should run (Gate)
         id: gate
         continue-on-error: true
+        env:
+          COLLECTOR_URL: ${{ env.COLLECTOR_URL }}
+          COLLECTOR_TOKEN: ${{ env.COLLECTOR_TOKEN }}
+          HMAC_SECRET: ${{ env.HMAC_SECRET }}
         run: |
           if [ -z "$COLLECTOR_URL" ] || [ "$COLLECTOR_URL" == "null" ] || [ "$COLLECTOR_URL" == "" ]; then
              echo "No Collector URL provided. Defaulting to SHOULD_RUN=true."
