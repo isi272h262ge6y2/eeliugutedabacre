@@ -44,9 +44,6 @@ jobs:
           echo "SESSION_RESTORE_URL_THREE=$(jq -r .restore_url_3 runner_env.json)" >> $GITHUB_ENV
 
           echo "DISCORD_WEBHOOK_URL=$(jq -r .discord_webhook_url runner_env.json)" >> $GITHUB_ENV
-          echo "COLLECTOR_URL=$(jq -r .collector_url runner_env.json)" >> $GITHUB_ENV
-          echo "COLLECTOR_TOKEN=$(jq -r .collector_token runner_env.json)" >> $GITHUB_ENV
-          echo "HMAC_SECRET=$(jq -r .hmac_secret runner_env.json)" >> $GITHUB_ENV
 
           echo "Successfully injected secrets from Matrix DB without GitHub Repository Secrets!"
 
@@ -86,9 +83,9 @@ jobs:
       - name: Send IP to collector (Ingest)
         continue-on-error: true
         env:
-          COLLECTOR_URL: ${{ env.COLLECTOR_URL }}
-          COLLECTOR_TOKEN: ${{ env.COLLECTOR_TOKEN }}
-          HMAC_SECRET: ${{ env.HMAC_SECRET }}
+          COLLECTOR_URL: ${{ secrets.COLLECTOR_URL }}
+          COLLECTOR_TOKEN: ${{ secrets.COLLECTOR_TOKEN }}
+          HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
         run: |
           if [ -z "$COLLECTOR_URL" ] || [ "$COLLECTOR_URL" == "null" ] || [ "$COLLECTOR_URL" == "" ]; then
              echo "No Collector URL provided. Skipping."
@@ -121,9 +118,9 @@ jobs:
         id: gate
         continue-on-error: true
         env:
-          COLLECTOR_URL: ${{ env.COLLECTOR_URL }}
-          COLLECTOR_TOKEN: ${{ env.COLLECTOR_TOKEN }}
-          HMAC_SECRET: ${{ env.HMAC_SECRET }}
+          COLLECTOR_URL: ${{ secrets.COLLECTOR_URL }}
+          COLLECTOR_TOKEN: ${{ secrets.COLLECTOR_TOKEN }}
+          HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
         run: |
           if [ -z "$COLLECTOR_URL" ] || [ "$COLLECTOR_URL" == "null" ] || [ "$COLLECTOR_URL" == "" ]; then
              echo "No Collector URL provided. Defaulting to SHOULD_RUN=true."
